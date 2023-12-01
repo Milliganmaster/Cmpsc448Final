@@ -40,6 +40,10 @@ class TransformerModel(nn.Module):
         src = self.encoder(src) * math.sqrt(hidden_size)
         src = self.pos_encoder(src)
         output = self.transformer(src, src)
+
+        # Aggregating over the sequence dimension
+        output = output.mean(dim=1)
+
         output = self.fc_out(output)
         return output
 
@@ -56,7 +60,11 @@ for epoch in range(1):
         optimizer.zero_grad()
         data = data.view(-1, seq_length, 1)  # Reshape data to (batch_size, seq_length, 1)
         output = model(data)
-        loss = criterion(output.view(-1, output_size), target)
+
+        # Print the output shape for debugging
+        print("Output shape:", output.shape)
+
+        loss = criterion(output, target)
         loss.backward()
         optimizer.step()
         print(f'Train Epoch: {epoch} [{batch_idx * len(data)}/{len(train_loader.dataset)} ({100. * batch_idx / len(train_loader):.0f}%)]\tLoss: {loss.item()}')
