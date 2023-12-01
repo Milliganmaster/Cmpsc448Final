@@ -3,48 +3,62 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.nn import Transformer
 import math
+from torchvision import datasets, transforms
 
-# Model Parameters
-input_size = 10  # size of input (Not used in the corrected code, but typically used for other purposes)
-hidden_size = 512  # dimension of the feedforward network model in nn.TransformerEncoder
-num_layers = 3  # number of nn.TransformerEncoderLayer in nn.TransformerEncoder
-num_heads = 8  # number of heads in the multiheadattention models
-output_size = 10  # size of output
+hidden_size = 512
+num_layers = 3
+num_heads = 8
+output_size = 10  # 10 classes for MNIST digits
+seq_length = 784  # 28x28 pixels
+
+class PositionalEncoding(nn.Module):
+    def init(self, d_model, dropout=0.1, max_len=5000):
+        super(PositionalEncoding, self).init()
+        self.dropout = nn.Dropout(p=dropout)
+
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        pe = pe.unsqueeze(0).transpose(0, 1)
+        self.register_buffer('pe', pe)
+
+    def forward(self, x):
+        x = x + self.pe[:x.size(0), :]
+        return self.dropout(x)
 
 class TransformerModel(nn.Module):
-    def __init__(self):
-        super(TransformerModel, self).__init__()
+    def init(self):
+        super(TransformerModel, self).init()
+        self.pos_encoder = PositionalEncoding(hidden_size)
+        self.encoder = nn.Linear(1, hidden_size)  # MNIST is grayscale, so input size is 1
         self.transformer = Transformer(d_model=hidden_size, nhead=num_heads, num_encoder_layers=num_layers, num_decoder_layers=num_layers)
         self.fc_out = nn.Linear(hidden_size, output_size)
 
-    def forward(self, src, tgt):
-        src = src * math.sqrt(hidden_size)
-        tgt = tgt * math.sqrt(hidden_size)
-        output = self.transformer(src, tgt)
+    def forward(self, src):
+        src = self.encoder(src) * math.sqrt(hidden_size)
+        src = self.pos_encoder(src)
+        output = self.transformer(src, src)
         output = self.fc_out(output)
         return output
 
-# Correcting the dimensions of src and tgt to match d_model (hidden_size)
-src = torch.rand((10, 32, hidden_size))  # (sequence length, batch size, feature number)
-tgt = torch.rand((10, 32, hidden_size))  # (sequence length, batch size, feature number)
+transform = transforms.Compose([transforms.ToTensor(), transforms.Lambda(lambda x: x.view(-1, 1))])
+train_dataset = datasets.MNIST(root='./data', train=True, download=True, transform=transform)
+train_loader = torch.utils.data.DataLoader(dataset=train_dataset, batch_size=32, shuffle=True)
 
-# Initialize the model, loss function, and optimizer
+
 model = TransformerModel()
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.Adam(model.parameters(), lr=0.001)
 
-# Forward pass
-output = model(src, tgt)
 
-# Dummy target for loss calculation
-# Normally, the target should be a tensor containing indices of the actual targets.
-# Here we create a dummy target tensor for demonstration purposes.
-tgt_indices = torch.randint(0, output_size, (tgt.numel()//hidden_size,), dtype=torch.long)
-
-loss = criterion(output.view(-1, output_size), tgt_indices)
-loss.backward()
-optimizer.step()
-
-# Output the loss value
-print(loss.item())
-
+for epoch in range(1):
+    for batch_idx, (data, target) in enumerate(train_loader):
+        optimizer.zero_grad()
+        data = data.view(-1, seq_length, 1)  # Reshape data to (batch_size, seq_length, 1)
+        output = model(data)
+        loss = criterion(output.view(-1, output_size), target)
+        loss.backward()
+        optimizer.step()
+        print(f'Train Epoch: {epoch} [{batch_idx * len(data)}/{len(train_loader.dataset)} ({100. * batch_idx / len(train_loader):.0f}%)]\tLoss: {loss.item():.6f}')
